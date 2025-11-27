@@ -1,7 +1,13 @@
-from fastapi import APIRouter, HTTPException, status
+import jwt
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from database import get_connection
 import hashlib
+
+SECRET_KEY = "SECRET_MEDICICOL_ACCESTOKEN_KEY"  # cámbiala por algo más seguro
+ALGORITHM = "HS256"
+TOKEN_EXPIRE_HOURS = 1
 
 router = APIRouter(prefix="/usuarios", tags=["Usuarios"])
 
@@ -54,22 +60,83 @@ class LoginData(BaseModel):
     contrasena: str
 
 @router.post("/login")
-def login(data: LoginData):
+# def login(data: LoginData):
+#     conn = get_connection()
+#     if conn is None:
+#         raise HTTPException(status_code=500, detail="Error de conexión con la base de datos")
+
+#     cursor = conn.cursor()
+#     hashed_pass = hashlib.sha256(data.contrasena.encode()).hexdigest()
+
+#     cursor.execute("SELECT id_usuario, nombre, correo, rol FROM Usuarios WHERE correo=? AND contrasena=?", 
+#                    (data.correo, hashed_pass))
+#     user = cursor.fetchone()
+#     conn.close()
+
+#     if not user:
+#         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
+
+#     return {
+#         "message": "Inicio de sesión exitoso",
+#         "usuario": {
+#             "id": user[0],
+#             "nombre": user[1],
+#             "correo": user[2],
+#             "rol": user[3]
+#         }
+#     }
+
+def login(data: LoginData, response: Response):
+
     conn = get_connection()
     if conn is None:
         raise HTTPException(status_code=500, detail="Error de conexión con la base de datos")
 
     cursor = conn.cursor()
+
     hashed_pass = hashlib.sha256(data.contrasena.encode()).hexdigest()
 
-    cursor.execute("SELECT id_usuario, nombre, correo, rol FROM Usuarios WHERE correo=? AND contrasena=?", 
-                   (data.correo, hashed_pass))
+    cursor.execute(
+        "SELECT id_usuario, nombre, correo, rol FROM Usuarios WHERE correo=? AND contrasena=?", 
+        (data.correo, hashed_pass)
+    )
+
     user = cursor.fetchone()
     conn.close()
 
     if not user:
         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
 
+    # ------------------------------
+    # 1. CREAR TOKEN JWT
+    # ------------------------------
+    payload = {
+        "id": user[0],
+        "nombre": user[1],
+        "correo": user[2],
+        "rol": user[3],
+        "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
+        # "exp": datetime.utcnow() + timedelta(minutes=1)
+    }
+
+    token = jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+    # ------------------------------
+    # 2. GUARDAR TOKEN EN COOKIE HTTPONLY
+    # ------------------------------
+    response.set_cookie(
+        key="access_token",
+        value=token,
+        httponly=True,
+        secure=False,         # activar solo si usas HTTPS. Si estás en local -> poner False
+        samesite="lax",
+        max_age=60 * 60 * TOKEN_EXPIRE_HOURS,
+        path="/"
+    )
+
+    # ------------------------------
+    # 3. RETORNAR INFO DEL USUARIO
+    # ------------------------------
     return {
         "message": "Inicio de sesión exitoso",
         "usuario": {
@@ -79,7 +146,6 @@ def login(data: LoginData):
             "rol": user[3]
         }
     }
-
 
 # ---- 3️⃣ Obtener perfil ----
 @router.get("/{id_usuario}")
