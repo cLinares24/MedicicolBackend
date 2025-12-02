@@ -21,8 +21,8 @@ class MedicoRegistro(BaseModel):
     nombre: str
     cedula: str
     correo: str
+    telefono: str
     contrasena: str
-    contrasena2: str
     id_especialidad: int
 
 
@@ -36,7 +36,6 @@ class Disponibilidad(BaseModel):
     hora_inicio: str
     hora_fin: str
 
-
 # ---------------------------------------------------
 # 1️⃣ REGISTRAR MÉDICO
 # ---------------------------------------------------
@@ -45,37 +44,49 @@ def registrar_medico(data: MedicoRegistro):
     conn = get_connection()
     cursor = conn.cursor()
 
-    if data.contrasena != data.contrasena2:
-        raise HTTPException(status_code=400, detail="Las contraseñas no coinciden")
-
     hashed_pass = hashlib.sha256(data.contrasena.encode()).hexdigest()
-    hashed_pass2 = hashlib.sha256(data.contrasena2.encode()).hexdigest()
+    hashed_pass2 = hashed_pass
 
     try:
-        # Insertar también el rol en la tabla Usuarios
+        # ---------- INSERT USUARIOS (CORREGIDO) ----------
         cursor.execute("""
             INSERT INTO Usuarios (nombre, cedula, correo, contrasena, genero, rol, contrasena2)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (data.nombre, data.cedula, data.correo, hashed_pass, None, "medico", hashed_pass2))
+        """, (
+            data.nombre,
+            data.cedula,
+            data.correo,
+            hashed_pass,
+            "H",
+            "medico",
+            hashed_pass2
+        ))
 
-        # Recuperar el id del usuario recién creado
         cursor.execute("SELECT SCOPE_IDENTITY()")
         id_usuario = cursor.fetchone()[0]
 
-        # Insertar en tabla Médicos
+        # ---------- INSERT MEDICOS (CORREGIDO) ----------
         cursor.execute("""
-            INSERT INTO Medicos (nombre, cedula, correo, id_especialidad)
-            VALUES (?, ?, ?, ?)
-        """, (data.nombre, data.cedula, data.correo, data.id_especialidad))
+            INSERT INTO dbo.Medicos (nombre, cedula, correo, telefono, id_especialidad)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            data.nombre,
+            data.cedula,
+            data.correo,
+            data.telefono,
+            data.id_especialidad
+        ))
 
         conn.commit()
-        return {"message": "✅ Médico registrado exitosamente", "id_usuario": id_usuario}
+        return {"message": "Médico registrado exitosamente"}
+
     except Exception as e:
         conn.rollback()
+        print("🔥 ERROR EXACTO:", e)   # <- Esto te mostrará el error real
         raise HTTPException(status_code=400, detail=f"Error al registrar médico: {e}")
+
     finally:
         conn.close()
-
 
 # ---------------------------------------------------
 # 2️⃣ LOGIN MÉDICO
@@ -237,3 +248,29 @@ def agregar_nota_medica(id_cita: int, data: NotaMedica):
         raise HTTPException(status_code=400, detail=f"Error al agregar nota médica: {e}")
     finally:
         conn.close()
+
+
+# ---------------------------------------------------
+# 3️⃣.5️⃣ OBTENER MÉDICOS POR ESPECIALIDAD
+# ---------------------------------------------------
+@router.get("/especialidad/{id_especialidad}")
+def medicos_por_especialidad(id_especialidad: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT m.id_medico, m.nombre, m.cedula, m.correo, m.telefono, e.nombre AS especialidad
+        FROM Medicos m
+        JOIN Especialidades e ON m.id_especialidad = e.id_especialidad
+        WHERE m.id_especialidad = ?
+    """, id_especialidad)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No hay médicos en esta especialidad")
+
+    keys = ["id_medico", "nombre", "cedula", "correo", "telefono", "especialidad"]
+
+    return [dict(zip(keys, r)) for r in rows]

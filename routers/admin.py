@@ -1,7 +1,23 @@
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from database import get_connection
 
 router = APIRouter(prefix="/admin", tags=["Administración"])
+
+class UsuarioUpdate(BaseModel):
+    nombre: str | None = None
+    correo: str | None = None
+    cedula: str | None = None
+    genero: str | None = None
+    rol: str | None = None
+    
+
+class MedicoUpdate(BaseModel):
+    nombre: str | None = None
+    cedula: str | None = None
+    correo: str | None = None
+    telefono: str | None = None
+    id_especialidad: int | None = None  # <- debe ser opcional
 
 # ---------------------------------------------------
 # 1️⃣ LISTAR TODOS LOS USUARIOS
@@ -11,7 +27,7 @@ def listar_usuarios(rol: str | None = None):
     conn = get_connection()
     cursor = conn.cursor()
 
-    query = "SELECT id_usuario, nombre, cedula, correo, rol, fecha_registro FROM Usuarios"
+    query = "SELECT id_usuario, nombre, cedula, correo, rol, fecha_registro FROM Usuarios WHERE rol = 'paciente'"
     params = []
 
     if rol:
@@ -25,27 +41,64 @@ def listar_usuarios(rol: str | None = None):
     keys = ["id_usuario", "nombre", "cedula", "correo", "rol", "fecha_registro"]
     return [dict(zip(keys, r)) for r in rows]
 
+# ---------------------------------------------------
+# 1️⃣ LISTAR TODOS LOS MÉDICOS
+# ---------------------------------------------------
+@router.get("/medicos")
+def listar_medicos():
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT 
+            m.id_medico,
+            m.nombre,
+            m.cedula,
+            m.correo,
+            m.telefono,
+            e.nombre AS especialidad
+        FROM Medicos m
+        JOIN Especialidades e ON m.id_especialidad = e.id_especialidad
+    """)
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    keys = ["id_medico", "nombre", "cedula", "correo", "telefono", "especialidad"]
+    return [dict(zip(keys, r)) for r in rows]
+
+
 
 # ---------------------------------------------------
 # 2️⃣ EDITAR USUARIO / MÉDICO
 # ---------------------------------------------------
 @router.put("/usuarios/{id_usuario}")
-def editar_usuario(id_usuario: int, nombre: str | None = None, correo: str | None = None, rol: str | None = None):
+def editar_usuario(id_usuario: int, data: UsuarioUpdate):
     conn = get_connection()
     cursor = conn.cursor()
 
     campos = []
     valores = []
 
-    if nombre:
+    if data.nombre:
         campos.append("nombre=?")
-        valores.append(nombre)
-    if correo:
+        valores.append(data.nombre)
+
+    if data.correo:
         campos.append("correo=?")
-        valores.append(correo)
-    if rol:
+        valores.append(data.correo)
+
+    if data.cedula:
+        campos.append("cedula=?")
+        valores.append(data.cedula)
+
+    if data.genero:
+        campos.append("genero=?")
+        valores.append(data.genero)
+
+    if data.rol:
         campos.append("rol=?")
-        valores.append(rol)
+        valores.append(data.rol)
 
     if not campos:
         raise HTTPException(status_code=400, detail="No se proporcionaron campos para actualizar")
@@ -56,16 +109,109 @@ def editar_usuario(id_usuario: int, nombre: str | None = None, correo: str | Non
     try:
         cursor.execute(query, tuple(valores))
         conn.commit()
-        return {"message": "✅ Usuario actualizado correctamente"}
+        return {"message": "Usuario actualizado correctamente"}
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=400, detail=f"Error al actualizar usuario: {e}")
     finally:
         conn.close()
+        
+        # ---------------------------------------------------
+# ✏️ EDITAR MÉDICO (y su usuario asociado)
+# ---------------------------------------------------
+@router.put("/medicos/{id_medico}")
+def editar_medico(id_medico: int, data: MedicoUpdate):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        # 1️⃣ Obtener el correo del médico
+        cursor.execute("SELECT correo FROM Medicos WHERE id_medico=?", id_medico)
+        medico = cursor.fetchone()
+
+        if not medico:
+            raise HTTPException(status_code=404, detail="Médico no encontrado")
+
+        correo_actual = medico[0]
+
+        # 2️⃣ Obtener el id_usuario asociado
+        # cursor.execute("SELECT id_usuario FROM Usuarios WHERE correo=?", correo_actual)
+        cursor.execute("""
+    SELECT U.id_usuario 
+    FROM Usuarios U
+    JOIN Medicos M ON U.correo = M.correo
+    WHERE M.id_medico = ?
+""", (id_medico,))
+
+        usuario = cursor.fetchone()
+
+        if not usuario:
+            raise HTTPException(status_code=404, detail="Usuario asociado no encontrado")
+
+        id_usuario = usuario[0]
+
+        # 3️⃣ Construir updates dinámicos para Medicos
+        campos_medicos = []
+        valores_medicos = []
+
+        if data.nombre:
+            campos_medicos.append("nombre=?")
+            valores_medicos.append(data.nombre)
+
+        if data.cedula:
+            campos_medicos.append("cedula=?")
+            valores_medicos.append(data.cedula)
+
+        if data.correo:
+            campos_medicos.append("correo=?")
+            valores_medicos.append(data.correo)
+
+        if data.telefono:
+            campos_medicos.append("telefono=?")
+            valores_medicos.append(data.telefono)
+
+        # 4️⃣ Construir updates dinámicos para Usuarios
+        campos_usuarios = []
+        valores_usuarios = []
+
+        if data.nombre:
+            campos_usuarios.append("nombre=?")
+            valores_usuarios.append(data.nombre)
+
+        if data.cedula:
+            campos_usuarios.append("cedula=?")
+            valores_usuarios.append(data.cedula)
+
+        if data.correo:
+            campos_usuarios.append("correo=?")
+            valores_usuarios.append(data.correo)
+
+        # 5️⃣ Ejecutar UPDATE en Medicos
+        if campos_medicos:
+            query_medico = f"UPDATE Medicos SET {', '.join(campos_medicos)} WHERE id_medico=?"
+            valores_medicos.append(id_medico)
+            cursor.execute(query_medico, tuple(valores_medicos))
+
+        # 6️⃣ Ejecutar UPDATE en Usuarios
+        if campos_usuarios:
+            query_usuario = f"UPDATE Usuarios SET {', '.join(campos_usuarios)} WHERE id_usuario=?"
+            valores_usuarios.append(id_usuario)
+            cursor.execute(query_usuario, tuple(valores_usuarios))
+
+        conn.commit()
+        return {"message": "📝 Médico actualizado correctamente"}
+
+    except Exception as e:
+        conn.rollback()
+        print("🔥 ERROR EXACTO:", e)   # <- Esto te mostrará el error real
+        raise HTTPException(status_code=400, detail=f"Error al actualizar médico: {e}")
+
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------
-# 3️⃣ ELIMINAR USUARIO / MÉDICO
+# 3️⃣ ELIMINAR USUARIO
 # ---------------------------------------------------
 @router.delete("/usuarios/{id_usuario}")
 def eliminar_usuario(id_usuario: int):
@@ -81,6 +227,29 @@ def eliminar_usuario(id_usuario: int):
     finally:
         conn.close()
 
+# ---------------------------------------------------
+# 3️⃣ ELIMINAR MÉDICO
+# ---------------------------------------------------
+@router.delete("/medicos/{id_medico}")
+def eliminar_medico(id_medico: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    try:
+        # 1️⃣ Buscar el correo del médico
+        # cursor.execute("SELECT correo FROM Medicos WHERE id_medico=?", id_medico)
+        cursor.execute("DELETE FROM Medicos WHERE id_medico=?", id_medico)
+
+        conn.commit()
+        return {"message": "🗑️ Médico y usuario eliminados correctamente"}
+
+    except Exception as e:
+        conn.rollback()
+        print("🔥 ERROR EXACTO:", e)   # <- Esto te mostrará el error real
+        raise HTTPException(status_code=400, detail=f"Error al eliminar médico: {e}")
+
+    finally:
+        conn.close()
 
 # ---------------------------------------------------
 # 4️⃣ LISTAR TODAS LAS CITAS (FILTRAR POR ESTADO O FECHA)

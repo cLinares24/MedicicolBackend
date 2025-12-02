@@ -30,6 +30,13 @@ class NotificacionCita(BaseModel):
     hora: str
     medico: str
 
+class NotificacionCitaCancelada(BaseModel):
+    correo: EmailStr
+    nombre_usuario: str
+    medico: str
+    fecha: str
+    hora: str
+
 
 # ---------------------------------------------------
 # 1️⃣ CONFIRMACIÓN DE CITA
@@ -134,5 +141,37 @@ async def enviar_cambio_cita(data: NotificacionCambio):
     try:
         await fm.send_message(mensaje)
         return {"message": f"📨 Correo de cita {data.motivo} enviado correctamente"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al enviar correo: {e}")
+
+
+###Cita cancelada
+@router.post("/cita-cancelada")
+async def enviar_cita_cancelada(data: NotificacionCitaCancelada):
+
+    mensaje = MessageSchema(
+        subject="❌ Tu cita ha sido cancelada - MediciCol",
+        recipients=[data.correo],
+        body=f"""
+        Hola {data.nombre_usuario},
+
+        Queremos informarte que tu cita ha sido cancelada:
+        
+        🩺 Médico: {data.medico}
+        📅 Fecha: {data.fecha}
+        ⏰ Hora: {data.hora}
+
+        Si deseas volver a agendar la cita, puedes hacerlo desde nuestra plataforma
+        o contactando al equipo de soporte.
+
+        Equipo MediciCol 💙
+        """,
+        subtype="plain"
+    )
+
+    fm = FastMail(conf)
+    try:
+        await fm.send_message(mensaje)
+        return {"message": "📨 Notificación de cita cancelada enviada correctamente"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al enviar correo: {e}")

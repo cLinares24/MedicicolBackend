@@ -22,6 +22,12 @@ class Usuario(BaseModel):
     rol: str = "paciente"  # valor por defecto
 
 
+class UsuarioEditar(BaseModel):
+    nombre: str | None = None
+    cedula: str | None = None
+    correo: str | None = None
+    genero: str | None = None
+
 # ---- 1️⃣ Registrar usuario ----
 @router.post("/registro")
 def registrar_usuario(usuario: Usuario):
@@ -53,39 +59,12 @@ def registrar_usuario(usuario: Usuario):
     finally:
         conn.close()
 
-
 # ---- 2️⃣ Login ----
 class LoginData(BaseModel):
     correo: str
     contrasena: str
 
 @router.post("/login")
-# def login(data: LoginData):
-#     conn = get_connection()
-#     if conn is None:
-#         raise HTTPException(status_code=500, detail="Error de conexión con la base de datos")
-
-#     cursor = conn.cursor()
-#     hashed_pass = hashlib.sha256(data.contrasena.encode()).hexdigest()
-
-#     cursor.execute("SELECT id_usuario, nombre, correo, rol FROM Usuarios WHERE correo=? AND contrasena=?", 
-#                    (data.correo, hashed_pass))
-#     user = cursor.fetchone()
-#     conn.close()
-
-#     if not user:
-#         raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
-
-#     return {
-#         "message": "Inicio de sesión exitoso",
-#         "usuario": {
-#             "id": user[0],
-#             "nombre": user[1],
-#             "correo": user[2],
-#             "rol": user[3]
-#         }
-#     }
-
 def login(data: LoginData, response: Response):
 
     conn = get_connection()
@@ -167,3 +146,54 @@ def obtener_perfil(id_usuario: int):
 
     keys = ["nombre", "cedula", "correo", "genero", "rol", "fecha_registro"]
     return dict(zip(keys, user))
+
+@router.put("/{id_usuario}")
+def editar_usuario(id_usuario: int, data: UsuarioEditar):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    campos = []
+    valores = []
+
+    if data.nombre is not None:
+        campos.append("nombre=?")
+        valores.append(data.nombre)
+
+    if data.cedula is not None:
+        campos.append("cedula=?")
+        valores.append(data.cedula)
+
+    if data.correo is not None:
+        campos.append("correo=?")
+        valores.append(data.correo)
+
+    if data.genero is not None:
+        campos.append("genero=?")
+        valores.append(data.genero)
+
+    if len(campos) == 0:
+        raise HTTPException(status_code=400, detail="No hay campos válidos para actualizar")
+
+    valores.append(id_usuario)
+
+    query = f"""
+        UPDATE Usuarios 
+        SET {", ".join(campos)}
+        WHERE id_usuario=?
+    """
+
+    try:
+        cursor.execute(query, valores)
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        return {"message": "✅ Usuario actualizado correctamente"}
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Error al editar usuario: {e}")
+
+    finally:
+        conn.close()
