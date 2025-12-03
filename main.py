@@ -7,6 +7,7 @@ app = FastAPI(title="MediciCol API")
 
 origins = [
     "http://localhost:3000",
+    "https://medicicol.site"
 ]
 
 app.add_middleware(
