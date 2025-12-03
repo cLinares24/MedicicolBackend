@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from routers import usuarios, medicos, citas, admin, notificaciones, dudas
 from fastapi.middleware.cors import CORSMiddleware
-
+import os
 
 app = FastAPI(title="MediciCol API")
 
@@ -26,3 +26,9 @@ app.include_router(dudas.router)
 @app.get("/")
 def root():
     return {"message": "API MediciCol funcionando 🔥"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
