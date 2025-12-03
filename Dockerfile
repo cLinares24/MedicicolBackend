@@ -1,31 +1,35 @@
 FROM python:3.12-slim
 
+# Evitar prompts interactivos
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Instalar dependencias necesarias
 RUN apt-get update && apt-get install -y \
+    gnupg \
     curl \
-    gpg \
     apt-transport-https \
     unixodbc \
     unixodbc-dev \
     build-essential
 
-# Descargar claves de Microsoft y agregar repositorio ODBC
-RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
-    && curl https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/microsoft-prod.list
+# Agregar repositorio de Microsoft (para Debian 12)
+RUN curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
+    > /etc/apt/sources.list.d/microsoft-prod.list
 
-# Instalar el driver ODBC 18
-RUN apt-get update && apt-get install -y msodbcsql18
+# Aceptar EULA e instalar ODBC Driver 18
+RUN apt-get update && ACCEPT_EULA=Y apt-get install -y msodbcsql18
 
 # Crear directorio de la app
 WORKDIR /app
 
-# Copiar archivos del backend
+# Copiar archivos
 COPY . /app
 
-# Instalar dependencias del proyecto
+# Instalar dependencias Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Exponer el puerto para uvicorn
+# Exponer puerto
 EXPOSE 8000
 
 # Comando de arranque
